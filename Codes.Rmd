@@ -1,0 +1,350 @@
+---
+title: "Initial Results & Code"
+author: "Joelle Koo"
+date: '2018-11-04'
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Packages and Libraries
+```{r}
+#install.packages("lubridate")
+library(lubridate)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("geosphere")
+library(geosphere)
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("magrittr")
+library(magrittr)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("corrplot")
+library(corrplot)
+#install.packages("Rmisc")
+library(Rmisc)
+#install.packages("GoodmanKruskal")
+library(GoodmanKruskal)
+#install.packages("igraph")
+library(igraph)
+#install.packages("TTR")
+library(TTR)
+#install.packages("randomForest")
+library(randomForest)
+#install.packages("glmnet")
+library(glmnet)
+#install.packages("standardize")
+library(standardize)
+```
+
+## Load dataset
+```{r}
+set1 <- read.csv("/Users/joellekoo/Downloads/all/train.csv", stringsAsFactors = FALSE, header = TRUE)
+```
+
+## Summary and structure of dataset
+```{r}
+#Summary and structure of set1
+summary(set1)
+str(set1)
+
+#Check for missing values in set 1
+sapply(set1, function(x) sum(is.na(x)))
+#No missing values identified
+```
+
+```{r}
+#Convert vendor_id, passenger_count and store_and_fwd_flag 
+set1$vendor_id <- as.integer(set1$vendor_id)
+set1$passenger_count <- as.integer(set1$passenger_count)
+
+set1$store_and_fwd_flag[set1$store_and_fwd_flag == "N"] = "0"
+set1$store_and_fwd_flag[set1$store_and_fwd_flag == "Y"] = "1"
+
+set1$store_and_fwd_flag <- as.integer(set1$store_and_fwd_flag)
+set1$store_and_fwd_flag <- as.numeric(set1$store_and_fwd_flag)
+
+```
+
+```{r}
+#Extract month, day, weekday, hour and minute from pickup and dropoff date and time variables
+set1$pickup_month <- month(set1$pickup_datetime)
+set1$pickup_day <- day(set1$pickup_datetime)
+set1$pickup_hour <- hour(set1$pickup_datetime)
+set1$pickup_min <- minute(set1$pickup_datetime)
+set1$pickup_wday <- wday(set1$pickup_datetime)
+
+set1$dropoff_month <- month(set1$dropoff_datetime)
+set1$dropoff_day <- day(set1$dropoff_datetime)
+set1$dropoff_hour <- hour(set1$dropoff_datetime)
+set1$dropoff_min <- minute(set1$dropoff_datetime)
+set1$dropoff_wday <- wday(set1$dropoff_datetime)
+```
+
+```{r}
+#Calculate distance (in meters) between pickup and dropoff locations
+pickup_coord <- dplyr::select(set1, c(pickup_longitude, pickup_latitude))
+dropoff_coord <- dplyr::select(set1, c(dropoff_longitude, dropoff_latitude))
+
+set1$dist <- distCosine(pickup_coord, dropoff_coord)
+```
+
+## Visualization of independent and response variables
+```{r}
+#vendor_id
+p1 <- ggplot(set1, aes(x=vendor_id)) + geom_bar() + scale_x_discrete(limits=c("1", "2"))
+
+#passenger_count
+p2 <- set1 %>%
+  group_by(passenger_count) %>%
+  count() %>%
+  ggplot(aes(x=passenger_count, fill=passenger_count)) +
+  geom_bar() + scale_y_sqrt() +
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9"))
+
+#store_and_fwd_flag
+p3 <- ggplot(set1, aes(x=store_and_fwd_flag)) + geom_bar()
+
+#weekdays and weekends
+set1$pickup_class <- cut(set1$pickup_wday, breaks=c(0,5,7), labels=c("w-day", "w-end"))
+p4 <- ggplot(set1, aes(x=pickup_class)) + geom_bar() 
+
+p1_p4 <- matrix(c(1,2,3,4), 2,1, byrow=TRUE)
+source("http://peterhaschke.com/Code/multiplot.R")
+multiplot(p1,p2,p3,p4, cols=2)
+```
+
+```{r}
+#pickup_month
+p5 <- set1 %>%
+  mutate(month = month(pickup_datetime, label=TRUE)) %>%
+  group_by(pickup_month, vendor_id) %>%
+  count() %>%
+  ggplot(aes(x=pickup_month, n, colour=vendor_id)) + geom_point(size=4) +
+  labs(x = "Month in 2016", y = "Total number of pickups") + 
+  theme(legend.position = "none")
+
+#pickup_day
+p6 <- set1 %>%
+  mutate(wday = wday(pickup_datetime, label=TRUE)) %>%
+  group_by(wday, vendor_id) %>%
+  count() %>%
+  ggplot(aes(x=wday, n, colour = vendor_id)) + geom_point(size = 4) +
+  labs(x = "Day of the week", y = "Total number of pickups") +
+  theme(legend.position = "none")
+
+#pickup_hour
+p7 <- set1 %>%
+  mutate(h = hour(pickup_datetime)) %>%
+  group_by(pickup_hour, vendor_id) %>%
+  count() %>%
+  ggplot(aes(x=pickup_hour, n, colour=vendor_id)) + geom_point(size=4) +
+  labs(x = "Hour of the day", y = "Total number of pickups") +
+  theme(legend.position = "none")
+
+p5_p7 <- matrix(c(1,2,3), byrow=TRUE)
+source("http://peterhaschke.com/Code/multiplot.R")
+multiplot(p5,p6,p7, layout=p5_p7)
+```
+
+```{r}
+#Check if distribution of response variable trip_duration is close to normality
+ggplot(set1, aes(x=trip_duration)) + geom_histogram(bins=30) 
+
+#Distribution is right-skewed - to treat this imbalance, log transformation is applied to normalize distribution. To avoid an undefined log(0), we will add +1 in the formula and will remember to remove the 1 second for the prediction file.
+
+set1$t_trip_duration = log(set1$trip_duration + 1)
+ggplot(set1, aes(t_trip_duration)) + geom_histogram()
+```
+
+```{r}
+#Correlation between independent and response variables
+#Numeric variables
+sub_num <- subset(set1, select=-c(id, pickup_datetime, dropoff_datetime, pickup_class, store_and_fwd_flag))
+
+cor_num <- cor(sub_num, method="pearson")
+corrplot(cor_num, method="number")
+corrplot.mixed(cor_num, tl.pos=c("lt"), upper=c("ellipse"), lower=c("number"))
+
+#Relationship between trip_duration and (shortest) distance between dropoff and pickup on a spherical earth
+set.seed(100)
+set1 %>%
+  sample_n(5e4) %>%
+  ggplot(aes(x=dist, y=trip_duration)) + geom_point() +
+  scale_x_log10() + scale_y_log10() +
+  labs(x = "Direct distance in meters", y = "Trip duration in seconds")
+
+#Factor variables
+chisq.test(set1$store_and_fwd_flag, set1$trip_duration, correct=FALSE)
+#since p-value is less than cut-off value of 0.05, we reject the null hypothesis and conclude that store_and_fwd_flag and trip_duration are dependent on each other
+
+chisq.test(set1$pickup_class, set1$trip_duration, correct=FALSE)
+#since p-value is less than cut-off value of 0.05, we reject the null hypothesis and conclude that pickup_class and trip_duration are dependent on each other
+
+var <- c("store_and_fwd_flag", "pickup_class", "trip_duration")
+frame1 <- subset(set1, select=var)
+GKmatrix <- GKtauDataframe(frame1)
+plot(GKmatrix, corrColors="blue")
+```
+
+```{r}
+#Scatterplots to analyze relationships between independent and response variables
+plot(set1$t_trip_duration~set1$vendor_id+set1$passenger_count+set1$pickup_longitude+set1$pickup_latitude+set1$dropoff_longitude+set1$dropoff_latitude+set1$store_and_fwd_flag+set1$pickup_month+set1$pickup_day+set1$pickup_hour+set1$pickup_min+set1$pickup_wday+set1$dropoff_month+set1$dropoff_day+set1$dropoff_hour+set1$dropoff_min+set1$dropoff_wday+set1$dist)
+```
+
+```{r}
+#To avoid overlapping of variables, create new.set without pickup_datetime, dropoff_datetime, pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude, trip_duration, pickup_class, pickup_wday and dropoff_wday)
+#To avoid overfitting, the trip id will also not be included in the new.set
+new.set <- subset(set1, select=-c(id, pickup_datetime, dropoff_datetime, pickup_class, pickup_wday, dropoff_wday, t_trip_duration))
+
+head(new.set)
+tail(new.set)
+nrow(new.set)
+
+s <- data.frame(vendor_id=scale(new.set$vendor_id),                      passenger_count=scale(new.set$passenger_count),
+          pickup_longitude=scale(new.set$pickup_longitude),
+                pickup_latitude=scale(new.set$pickup_latitude),
+          dropoff_longitude=scale(new.set$dropoff_longitude),
+          dropoff_latitude=scale(new.set$dropoff_latitude),
+          store_and_fwd_flag=scale(new.set$store_and_fwd_flag),
+          trip_duration=scale(new.set$trip_duration), 
+          pickup_month=scale(new.set$pickup_month),
+          pickup_day=scale(new.set$pickup_day),
+          pickup_hour=scale(new.set$pickup_hour),
+          pickup_min=scale(new.set$pickup_min),
+          dropoff_month=scale(new.set$dropoff_month),
+          dropoff_day=scale(new.set$dropoff_day),
+          dropoff_hour=scale(new.set$dropoff_hour),
+          dropoff_min=scale(new.set$dropoff_min),
+          dist=scale(new.set$dist))
+                         
+```
+
+```{r}
+#Create training and test sets
+set.seed(100) #to reproduce results of random sampling
+trainingRowIndex <- sample(1:nrow(s), 0.8*nrow(s))
+train_data <- s[trainingRowIndex, ]
+test_data <- s[-trainingRowIndex, ]
+```
+
+## Prediction Models
+```{r}
+#Baseline model - predict mean of training data
+b_model <- mean(train_data$trip_duration)
+
+#Evaluate RMSE and MAE on the testing data
+RMSE.baseline <- sqrt(mean((b_model-test_data$trip_duration)^2))
+RMSE.baseline
+
+MAE.baseline <- mean(abs(b_model-test_data$trip_duration))
+MAE.baseline
+```
+
+
+```{r}
+#Multiple Linear Regression
+#Fit the full model (check effect of multicollinearity)
+model1 <- lm(log(trip_duration+1) ~ vendor_id + passenger_count + pickup_month + pickup_day + pickup_hour + pickup_min + pickup_longitude + pickup_latitude + dropoff_longitude + dropoff_latitude + dropoff_month + dropoff_day + dropoff_hour + dropoff_min + dist, data=train_data)
+summary(model1)
+
+ggplot(data=train_data, aes(x=log(trip_duration+1), y=vendor_id + passenger_count + pickup_month + pickup_day + pickup_hour + pickup_min + pickup_longitude + pickup_latitude + dropoff_longitude + dropoff_latitude + dropoff_month + dropoff_day + dropoff_hour + dropoff_min + dist)) + geom_point()
+
+hist(model1$residuals)
+#Residuals are not normally distributed, which violates one of the basic assumptions of linear regression that residuals are normally distributed.
+
+#Apply model to test set and exponentiate results to revert the log transformation
+pred_model1 <- exp(predict(model1, test_data))-1
+
+#Evaluate the model performance
+results_1 <- data.frame(RMSE = sqrt(mean((pred_model1-test_data$trip_duration)^2)),
+                         MAE = mean(abs(pred_model1-test_data$trip_duration)))
+
+pr <- residuals(pred_model1)/(1-lm.influence(pred_model1))
+PRESS <- sum(pr^2)
+
+anova_1 <- anova(pred_model1)
+tss <- sum(anova_1$"Sum Sq")
+
+pred.r.squared <- 1-PRESS/(tss)
+
+
+#store_and_fwd_flag has p value 0.148 - this predictor is not meaningful for the regression.
+#other variables have p values < 0.05 - they are meaningful for the model.
+```
+
+```{r}
+#Tuning the regression model
+step_model1 <- step(model1, direction="backward")
+step_model1$anova
+#Initial and final models are the same
+#This is unusual - I will need to investigate further to check why it is so
+```
+
+```{r}
+#Random Forest
+set.seed(123)
+
+#Create a random forest with 4 trees
+sub <- head(train_data, n=1000000)
+rf_model2 <- randomForest(x=sub, y=sub$trip_duration, ntree=5)
+rf_model22 <- randomForest(x=sub, y=sub$trip_duration, ntree=1)
+
+#How many trees are needed to reach minimum error estimate?
+which.min(rf_model2$mse)
+
+plot(rf_model2)
+
+#Using importance() function to calculate the importance of each variable
+imp_rf_model2 <- as.data.frame(sort(importance(rf_model2)[,1], decreasing=TRUE), optional=T)
+names(imp_rf_model2) <- "% Inc MSE"
+imp_rf_model2
+
+#Predict and evaluate on test set
+pred_model2 <- predict(rf_model22, test_data)
+RMSE.forest <- sqrt(mean((pred_model2-test_data$trip_duration)^2))
+RMSE.forest
+
+MAE.forest <- mean(abs(pred_model2-test_data$trip_duration))
+MAE.forest
+```
+
+```{r}
+#Lasso
+#Finding the best lambda using cross-validation
+set.seed(100)
+
+x <- model.matrix(trip_duration~., train_data)
+y <- train_data$trip_duration
+cv.lasso <- cv.glmnet(x,y, alpha=1)
+
+lasso_model3 <- glmnet(x,y, alpha=1, lambda=cv.lasso$lambda.min)
+
+x.test <- model.matrix(trip_duration~., test_data)[,-1]
+pred_model3 <- predict(lasso_model3, x.test)
+
+RMSE.lasso <- sqrt(mean((pred_model3-test_data$trip_duration)^2))
+RMSE.lasso
+
+MAE.lasso <- mean(abs(pred_model3-test_data$trip_duration))
+MAE.lasso
+```
+
+```{r}
+
+
+```
+
+`
